@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Internal Agents</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d0d14; color: #e2e8f0;
+      height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #13131f; border-bottom: 1px solid #1e1e30;
+      padding: 0 20px; height: 50px;
+      display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+    }
+    .h-title  { font-size: 14px; font-weight: 600; color: #f1f5f9; }
+    .h-sub    { font-size: 11px; color: #475569; }
+    .spacer   { flex: 1; }
+    .conn-pill {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; color: #475569;
+      background: #1a1a2a; border: 1px solid #1e1e30;
+      padding: 3px 10px; border-radius: 20px;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #334155; transition: background .3s; }
+    .dot.on  { background: #22c55e; box-shadow: 0 0 5px #22c55e80; }
+    .dot.err { background: #ef4444; }
+
+    /* ── Body layout ── */
+    .body { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Sidebar ── */
+    aside {
+      width: 268px; background: #13131f; border-right: 1px solid #1e1e30;
+      display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden;
+    }
+    .sec-label {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+      color: #334155; padding: 13px 14px 7px;
+    }
+
+    /* ── Stage cards ── */
+    .stages { padding: 0 9px; display: flex; flex-direction: column; gap: 4px; }
+    .stage {
+      border-radius: 7px; padding: 8px 10px;
+      border: 1px solid #1a1a28; background: #0d0d14;
+      transition: border-color .2s, background .2s;
+    }
+    .stage.active  { border-color: #4f46e5; background: #14142a; }
+    .stage.done    { border-color: #166534; background: #0a1c10; animation: none !important; }
+    .stage.errored { border-color: #7f1d1d; background: #180707; }
+
+    .stage.active { animation: glow 2s ease-in-out infinite; }
+    @keyframes glow {
+      0%,100% { box-shadow: none; }
+      50%     { box-shadow: 0 0 8px #4f46e530; }
+    }
+
+    .s-row { display: flex; align-items: center; gap: 7px; }
+    .s-icon { font-size: 14px; flex-shrink: 0; }
+    .s-name { font-size: 12px; font-weight: 600; flex: 1; color: #64748b; }
+    .stage.active .s-name  { color: #a5b4fc; }
+    .stage.done   .s-name  { color: #86efac; }
+
+    .s-pill {
+      font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      padding: 2px 6px; border-radius: 8px; background: #1a1a28; color: #334155;
+    }
+    .stage.active .s-pill  { background: #2e2b7a; color: #c7d2fe; }
+    .stage.done   .s-pill  { background: #14532d; color: #86efac; }
+    .stage.errored .s-pill { background: #450a0a; color: #fca5a5; }
+
+    .s-detail { font-size: 10px; color: #334155; margin-top: 3px; margin-left: 21px; line-height: 1.4; }
+    .stage.active .s-detail { color: #6366f1; }
+    .stage.done   .s-detail { color: #4ade80; }
+
+    /* ── Log ── */
+    .log-wrap { flex: 1; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid #1a1a28; margin-top: 8px; }
+    .log { flex: 1; overflow-y: auto; padding: 6px 10px; display: flex; flex-direction: column; gap: 0; }
+    .log-ln {
+      font-size: 10px; font-family: 'Consolas','Courier New',monospace;
+      color: #2a2a40; line-height: 1.55; padding: 0;
+      animation: fadeUp .2s ease;
+    }
+    .log-ln.hi { color: #475569; }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(2px) } to { opacity:1; transform:none } }
+
+    /* ── Chat ── */
+    .chat { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .msgs { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+
+    /* ── Welcome ── */
+    .welcome {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 10px; text-align: center; padding: 40px;
+    }
+    .welcome-icon { font-size: 42px; margin-bottom: 4px; }
+    .welcome h2   { font-size: 18px; font-weight: 600; color: #94a3b8; }
+    .welcome p    { font-size: 13px; line-height: 1.65; max-width: 400px; color: #475569; }
+    .eg-list      { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; width: 100%; max-width: 440px; }
+    .eg {
+      background: #13131f; border: 1px solid #1e1e30; border-radius: 8px;
+      padding: 9px 14px; font-size: 12px; color: #64748b; cursor: pointer; text-align: left;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .eg:hover { border-color: #4f46e5; color: #c7d2fe; background: #14142a; }
+
+    /* ── Bubbles ── */
+    .msg { display: flex; flex-direction: column; gap: 4px; }
+    .msg.user  { align-items: flex-end; }
+    .msg.agent { align-items: flex-start; max-width: 90%; }
+
+    .bubble { padding: 9px 13px; border-radius: 13px; font-size: 13.5px; line-height: 1.55; }
+    .msg.user  .bubble { background: #312e81; color: #e0e7ff; border-bottom-right-radius: 3px; max-width: 68%; }
+    .msg.agent .bubble { background: #13131f; border: 1px solid #1e1e30; color: #e2e8f0; border-bottom-left-radius: 3px; width: 100%; }
+    .msg.agent.err .bubble { background: #1a0707; border-color: #7f1d1d; color: #fca5a5; }
+
+    .meta { font-size: 10px; color: #2a2a40; padding: 0 3px; }
+
+    /* ── Thinking bubble (accumulating steps) ── */
+    .think-bubble {
+      background: #13131f; border: 1px solid #1e1e30;
+      border-radius: 13px; border-bottom-left-radius: 3px;
+      padding: 10px 13px; width: 100%;
+    }
+    .think-hdr {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; font-weight: 600; color: #475569;
+      letter-spacing: .04em; text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .dots { display: flex; gap: 3px; }
+    .dots span {
+      width: 5px; height: 5px; border-radius: 50%; background: #4f46e5;
+      animation: bounce 1.2s infinite;
+    }
+    .dots span:nth-child(2) { animation-delay: .17s; }
+    .dots span:nth-child(3) { animation-delay: .34s; }
+    @keyframes bounce {
+      0%,60%,100% { transform:translateY(0); opacity:.35; }
+      30%          { transform:translateY(-6px); opacity:1; }
+    }
+
+    .steps { display: flex; flex-direction: column; gap: 3px; }
+    .step  { display: flex; align-items: baseline; gap: 7px; font-size: 12px; line-height: 1.5; }
+    .step-ic { flex-shrink: 0; width: 14px; text-align: center; font-size: 11px; }
+    .step.done    .step-ic { color: #22c55e; }
+    .step.current .step-ic { color: #818cf8; animation: icPulse 1s infinite; }
+    .step.done    .step-tx { color: #475569; }
+    .step.current .step-tx { color: #c7d2fe; }
+    @keyframes icPulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* Agent label colouring */
+    .step .agent-tag {
+      font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+      padding: 1px 5px; border-radius: 4px; margin-right: 2px; flex-shrink: 0;
+    }
+    .tag-orchestrator { background: #1e1e50; color: #818cf8; }
+    .tag-collector    { background: #1a2e1a; color: #4ade80; }
+    .tag-processor    { background: #1e2a1e; color: #34d399; }
+    .tag-analyst      { background: #2a1e1e; color: #fb923c; }
+    .tag-reporter     { background: #1a1e2e; color: #60a5fa; }
+
+    /* ── Markdown report ── */
+    .report h1 { font-size: 16px; font-weight: 700; color: #f1f5f9; margin-bottom: 6px; }
+    .report h2 { font-size: 12px; font-weight: 700; color: #e2e8f0; margin: 16px 0 6px; padding-bottom: 4px; border-bottom: 1px solid #1e1e30; text-transform: uppercase; letter-spacing: .05em; }
+    .report h3 { font-size: 12px; font-weight: 600; color: #cbd5e1; margin: 12px 0 5px; }
+    .report p  { font-size: 13px; color: #cbd5e1; line-height: 1.7; margin-bottom: 8px; }
+    .report blockquote { border-left: 3px solid #4f46e5; padding: 7px 13px; margin: 10px 0; background: #14142a; border-radius: 0 6px 6px 0; color: #a5b4fc; font-style: italic; font-size: 13px; }
+    .report ul, .report ol { padding-left: 17px; margin-bottom: 9px; }
+    .report li { font-size: 13px; color: #cbd5e1; line-height: 1.65; margin-bottom: 3px; }
+    .report hr { border: none; border-top: 1px solid #1e1e30; margin: 12px 0; }
+    .report strong { color: #f1f5f9; }
+    .report em     { color: #94a3b8; }
+    .report table  { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; }
+    .report th { background: #1e1e30; padding: 6px 10px; text-align: left; font-weight: 600; color: #e2e8f0; border: 1px solid #2a2a3a; }
+    .report td { padding: 5px 10px; border: 1px solid #1e1e30; color: #cbd5e1; }
+    .report tr:nth-child(even) td { background: #111119; }
+    .report code { background: #1e1e30; padding: 1px 4px; border-radius: 3px; font-family: 'Consolas',monospace; font-size: 11px; color: #a5b4fc; }
+    .report pre  { background: #1e1e30; padding: 10px 12px; border-radius: 6px; overflow-x: auto; margin: 10px 0; }
+    .report pre code { background: transparent; padding: 0; }
+
+    /* ── Input ── */
+    .input-area {
+      border-top: 1px solid #1e1e30; padding: 13px 18px;
+      background: #0d0d14; flex-shrink: 0;
+    }
+    .input-box {
+      display: flex; gap: 9px; align-items: flex-end;
+      background: #13131f; border: 1px solid #1e1e30;
+      border-radius: 12px; padding: 7px 9px 7px 13px;
+      transition: border-color .2s;
+    }
+    .input-box:focus-within { border-color: #4f46e5; }
+    textarea {
+      flex: 1; background: transparent; border: none; outline: none;
+      color: #e2e8f0; font-size: 13.5px; font-family: inherit;
+      resize: none; min-height: 22px; max-height: 108px; line-height: 1.5;
+    }
+    textarea::placeholder { color: #2a2a40; }
+    textarea:disabled     { opacity: .5; }
+    .send {
+      background: #4f46e5; border: none; border-radius: 8px;
+      padding: 6px 16px; color: #fff; font-size: 13px; font-weight: 500;
+      cursor: pointer; flex-shrink: 0; height: 32px;
+      transition: background .15s;
+    }
+    .send:hover:not(:disabled) { background: #4338ca; }
+    .send:disabled { background: #1a1a28; color: #334155; cursor: not-allowed; }
+    .hint { font-size: 10px; color: #1e1e30; margin-top: 5px; text-align: right; }
+
+    ::-webkit-scrollbar       { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #1e1e30; border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:18px">🤖</span>
+  <div>
+    <div class="h-title">Internal Agents</div>
+    <div class="h-sub">Business Intelligence Pipeline</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="conn-pill">
+    <div class="dot" id="dot"></div>
+    <span id="connTxt">connecting…</span>
+  </div>
+</header>
+
+<div class="body">
+
+  <!-- ── Sidebar ── -->
+  <aside>
+    <div class="sec-label">Pipeline</div>
+    <div class="stages">
+      <div class="stage" id="s-orchestrator">
+        <div class="s-row">
+          <span class="s-icon">🧠</span>
+          <span class="s-name">Orchestrator</span>
+          <span class="s-pill">idle</span>
+        </div>
+        <div class="s-detail">Plans and drives the pipeline</div>
+      </div>
+      <div class="stage" id="s-collector">
+        <div class="s-row">
+          <span class="s-icon">🔍</span>
+          <span class="s-name">Data Collector</span>
+          <span class="s-pill">idle</span>
+        </div>
+        <div class="s-detail">Jira · HubSpot · Xero · Harvest · PandaDoc</div>
+      </div>
+      <div class="stage" id="s-processor">
+        <div class="s-row">
+          <span class="s-icon">⚙️</span>
+          <span class="s-name">Data Processor</span>
+          <span class="s-pill">idle</span>
+        </div>
+        <div class="s-detail">Cross-source joins and cleaning</div>
+      </div>
+      <div class="stage" id="s-analyst">
+        <div class="s-row">
+          <span class="s-icon">📊</span>
+          <span class="s-name">Data Analyst</span>
+          <span class="s-pill">idle</span>
+        </div>
+        <div class="s-detail">Metrics, anomalies, insights</div>
+      </div>
+      <div class="stage" id="s-reporter">
+        <div class="s-row">
+          <span class="s-icon">📝</span>
+          <span class="s-name">Reporter</span>
+          <span class="s-pill">idle</span>
+        </div>
+        <div class="s-detail">Audience-aware markdown report</div>
+      </div>
+    </div>
+
+    <div class="log-wrap">
+      <div class="sec-label">Activity</div>
+      <div class="log" id="log"></div>
+    </div>
+  </aside>
+
+  <!-- ── Chat ── -->
+  <div class="chat">
+    <div class="msgs" id="msgs">
+      <div class="welcome" id="welcome">
+        <div class="welcome-icon">🏢</div>
+        <h2>What do you want to know?</h2>
+        <p>Ask about sprint delivery, deal coverage, contractor costs, or any cross-source business question.</p>
+        <div class="eg-list">
+          <button class="eg" onclick="fill(this)">Summarize last sprint's delivery vs hours logged</button>
+          <button class="eg" onclick="fill(this)">Which deals closed last month don't have a signed contract yet?</button>
+          <button class="eg" onclick="fill(this)">Show contractor cost per project for Q1</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <div class="input-box">
+        <textarea id="inp" placeholder="Ask about your business data…" rows="1"
+          onkeydown="onKey(event)" oninput="grow(this)"></textarea>
+        <button class="send" id="btn" onclick="send()">Send</button>
+      </div>
+      <div class="hint">Enter to send · Shift+Enter for new line</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Constants ────────────────────────────────────────────────────────────────
+const WS_URL = `ws://${location.host}/stream`;
+
+const STAGE_DEFAULTS = {
+  orchestrator: 'Plans and drives the pipeline',
+  collector:    'Jira · HubSpot · Xero · Harvest · PandaDoc',
+  processor:    'Cross-source joins and cleaning',
+  analyst:      'Metrics, anomalies, insights',
+  reporter:     'Audience-aware markdown report',
+};
+
+// Detect which stage a progress message belongs to
+const STAGE_RULES = [
+  { re: /^Orchestrator:/i,                       id: 'orchestrator' },
+  { re: /Collecting data|Data Collector:/i,      id: 'collector'    },
+  { re: /Collected:/i,                           id: 'collector',  done: true },
+  { re: /Processing and joining|Data Processor:/i, id: 'processor'  },
+  { re: /Processed:/i,                           id: 'processor',  done: true },
+  { re: /Analysing:|Data Analyst:/i,             id: 'analyst'     },
+  { re: /Analysis complete/i,                    id: 'analyst',    done: true },
+  { re: /Generating .* report|Reporter:/i,       id: 'reporter'    },
+  { re: /Report generated/i,                     id: 'reporter',   done: true },
+];
+
+// Tag class by agent keyword in message
+function agentTag(msg) {
+  if (/^Orchestrator:/i.test(msg))            return ['orchestrator', 'Orchestrator'];
+  if (/Data Collector:|Collecting/i.test(msg)) return ['collector',    'Collector'];
+  if (/Data Processor:|Processing|Processed/i.test(msg)) return ['processor', 'Processor'];
+  if (/Data Analyst:|Analysing|Analysis/i.test(msg))     return ['analyst',   'Analyst'];
+  if (/Reporter:|Generating|Report/i.test(msg))          return ['reporter',  'Reporter'];
+  return ['orchestrator', 'Orchestrator'];
+}
+
+// ── State ────────────────────────────────────────────────────────────────────
+let ws, busy = false, activeStage = null;
+
+// ── WebSocket ────────────────────────────────────────────────────────────────
+function connect() {
+  setConn('connecting…', '');
+  ws = new WebSocket(WS_URL);
+  ws.onopen    = () => setConn('connected', 'on');
+  ws.onclose   = () => { setConn('reconnecting…', 'err'); setTimeout(connect, 2500); };
+  ws.onerror   = () => setConn('error', 'err');
+  ws.onmessage = ({ data }) => handle(JSON.parse(data));
+}
+
+function setConn(txt, cls) {
+  document.getElementById('connTxt').textContent = txt;
+  document.getElementById('dot').className = 'dot ' + cls;
+}
+
+// ── Message handler ───────────────────────────────────────────────────────────
+function handle(msg) {
+  if (msg.type === 'progress') {
+    appendLog(msg.message);
+    updateStage(msg.message);
+    appendStep(msg.message);          // ← adds a new step line in the chat bubble
+  } else if (msg.type === 'report') {
+    finalize(() => addReport(msg.markdown));
+  } else if (msg.type === 'result') {
+    finalize(() => addText(msg.text));
+  } else if (msg.type === 'error') {
+    finalize(() => addError(msg.detail));
+  }
+}
+
+// ── Stage cards ───────────────────────────────────────────────────────────────
+function updateStage(msg) {
+  for (const r of STAGE_RULES) {
+    if (r.re.test(msg)) {
+      if (activeStage && activeStage !== r.id && !r.done) {
+        // leave previous stage as-is (it'll be marked done by its done rule)
+      }
+      const el = document.getElementById(`s-${r.id}`);
+      if (!el) break;
+      const cls    = r.done ? 'done' : 'active';
+      const pill   = r.done ? 'done' : 'working';
+      el.className = `stage ${cls}`;
+      el.querySelector('.s-pill').textContent   = pill;
+      el.querySelector('.s-detail').textContent = stripTs(msg);
+      if (!r.done) activeStage = r.id;
+      break;
+    }
+  }
+}
+
+function resetStages() {
+  activeStage = null;
+  for (const [id, detail] of Object.entries(STAGE_DEFAULTS)) {
+    const el = document.getElementById(`s-${id}`);
+    el.className = 'stage';
+    el.querySelector('.s-pill').textContent   = 'idle';
+    el.querySelector('.s-detail').textContent = detail;
+  }
+}
+
+// ── Sidebar log ───────────────────────────────────────────────────────────────
+function appendLog(msg) {
+  const log = document.getElementById('log');
+  const el  = document.createElement('div');
+  el.className   = 'log-ln hi';
+  el.textContent = msg;
+  log.appendChild(el);
+  log.scrollTop  = log.scrollHeight;
+}
+
+function clearLog() { document.getElementById('log').innerHTML = ''; }
+
+// ── Chat: thinking steps ──────────────────────────────────────────────────────
+function addThinkBubble() {
+  const msgs = document.getElementById('msgs');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg agent';
+  wrap.id = 'think';
+  wrap.innerHTML = `
+    <div class="think-bubble">
+      <div class="think-hdr">
+        <div class="dots"><span></span><span></span><span></span></div>
+        Pipeline running
+      </div>
+      <div class="steps" id="steps"></div>
+    </div>`;
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function appendStep(msg) {
+  const steps = document.getElementById('steps');
+  if (!steps) return;
+
+  // Mark previous current → done
+  const prev = steps.querySelector('.step.current');
+  if (prev) {
+    prev.classList.replace('current', 'done');
+    prev.querySelector('.step-ic').textContent = '✓';
+  }
+
+  const [tagCls, tagLabel] = agentTag(msg);
+  const text = stripTs(msg);
+
+  const el = document.createElement('div');
+  el.className = 'step current';
+  el.innerHTML = `
+    <span class="step-ic">◉</span>
+    <span class="step-tx">
+      <span class="agent-tag tag-${tagCls}">${tagLabel}</span>${esc(text)}
+    </span>`;
+  steps.appendChild(el);
+  document.getElementById('think')?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+}
+
+function removeThink() { document.getElementById('think')?.remove(); }
+
+// ── Chat: final messages ──────────────────────────────────────────────────────
+function hideWelcome() { document.getElementById('welcome')?.remove(); }
+
+function addReport(markdown) {
+  const msgs = document.getElementById('msgs');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg agent';
+  const inner = document.createElement('div');
+  inner.className = 'bubble';
+  const report = document.createElement('div');
+  report.className = 'report';
+  report.innerHTML = marked.parse(markdown);
+  inner.appendChild(report);
+  const meta = document.createElement('div');
+  meta.className = 'meta'; meta.textContent = ts();
+  wrap.appendChild(inner); wrap.appendChild(meta);
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function addText(text) {
+  const msgs = document.getElementById('msgs');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg agent';
+  wrap.innerHTML = `<div class="bubble">${esc(text)}</div><div class="meta">${ts()}</div>`;
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function addError(detail) {
+  const msgs = document.getElementById('msgs');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg agent err';
+  wrap.innerHTML = `<div class="bubble">⚠️ ${esc(detail)}</div><div class="meta">${ts()}</div>`;
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function addUserMsg(text) {
+  const msgs = document.getElementById('msgs');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg user';
+  wrap.innerHTML = `<div class="bubble">${esc(text)}</div><div class="meta">${ts()}</div>`;
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function finalize(fn) {
+  // Mark last step done
+  const steps = document.getElementById('steps');
+  if (steps) {
+    const last = steps.querySelector('.step.current');
+    if (last) { last.classList.replace('current', 'done'); last.querySelector('.step-ic').textContent = '✓'; }
+  }
+  removeThink();
+  fn();
+  setBusy(false);
+}
+
+// ── Send ──────────────────────────────────────────────────────────────────────
+function send() {
+  const inp  = document.getElementById('inp');
+  const text = inp.value.trim();
+  if (!text || busy) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('Not connected — please wait.'); return; }
+
+  hideWelcome();
+  addUserMsg(text);
+  inp.value = ''; inp.style.height = 'auto';
+
+  clearLog();
+  resetStages();
+  addThinkBubble();
+  setBusy(true);
+
+  ws.send(JSON.stringify({ prompt: text }));
+}
+
+function setBusy(v) {
+  busy = v;
+  document.getElementById('btn').disabled = v;
+  document.getElementById('inp').disabled = v;
+  document.getElementById('btn').textContent = v ? '…' : 'Send';
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
+function grow(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 108) + 'px'; }
+function fill(btn) { const inp = document.getElementById('inp'); inp.value = btn.textContent; inp.focus(); grow(inp); }
+function esc(s)  { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function ts()    { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+function stripTs(s) { return s.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/,''); }
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+connect();
+</script>
+</body>
+</html>
