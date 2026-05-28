@@ -10,7 +10,7 @@ param([string]$Target = "help", [int]$Port = 0)
 
 $PYTHON = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 
-function Ensure-Env {
+function Initialize-Env {
     $envFile     = Join-Path $PSScriptRoot ".env"
     $exampleFile = Join-Path $PSScriptRoot ".env.example"
     if (-not (Test-Path $envFile)) {
@@ -77,7 +77,7 @@ function Assert-PortFree {
 }
 
 function Invoke-Dev {
-    Ensure-Env
+    Initialize-Env
     $port = Get-Port -Default 8000
     Assert-PortFree -Port $port
     $mockLabel = if ($env:MOCK_MODE -eq "false") { "live" } else { "mock" }
@@ -87,7 +87,7 @@ function Invoke-Dev {
 }
 
 function Invoke-DevDebug {
-    Ensure-Env
+    Initialize-Env
     $port = Get-Port -Default 8000
     Assert-PortFree -Port $port
     $mockLabel = if ($env:MOCK_MODE -eq "false") { "live" } else { "mock" }
@@ -97,7 +97,7 @@ function Invoke-DevDebug {
 }
 
 function Invoke-Start {
-    Ensure-Env
+    Initialize-Env
     $port = Get-Port -Default 8000
     Assert-PortFree -Port $port
     Write-Host "Starting API with real credentials at http://0.0.0.0:$port ..." -ForegroundColor Cyan
@@ -122,7 +122,7 @@ function Invoke-TestE2E {
 }
 
 function Invoke-StreamDemo {
-    Ensure-Env
+    Initialize-Env
     & $PYTHON scripts/ws_demo.py
 }
 
