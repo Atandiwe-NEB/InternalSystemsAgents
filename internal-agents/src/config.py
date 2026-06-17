@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     xero_client_id: str = Field("", alias="XERO_CLIENT_ID")
     xero_client_secret: str = Field("", alias="XERO_CLIENT_SECRET")
     xero_tenant_id: str = Field("", alias="XERO_TENANT_ID")
+    # Short-lived OAuth2 access token — obtain via Xero OAuth2 PKCE flow and paste here.
+    # Expires after 30 minutes; refresh using xero_client_id + xero_client_secret + refresh token.
+    xero_access_token: str = Field("", alias="XERO_ACCESS_TOKEN")
 
     # Harvest
     harvest_account_id: str = Field("", alias="HARVEST_ACCOUNT_ID")

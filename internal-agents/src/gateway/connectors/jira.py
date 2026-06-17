@@ -7,6 +7,7 @@ Real API docs:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from datetime import date, datetime
 from typing import Any
@@ -239,7 +240,7 @@ class JiraConnector:
     def _parse_issue_to_story(self, issue: dict[str, Any]) -> JiraStory:
         f = issue.get("fields", {})
         assignee_field = f.get("assignee") or {}
-        sprint_list = f.get("sprint") or f.get("customfield_10020") or []
+        sprint_list = f.get("customfield_10020") or []
         sprint_id: str | None = None
         if isinstance(sprint_list, list) and sprint_list:
             sprint_id = str(sprint_list[-1].get("id", ""))
@@ -251,13 +252,18 @@ class JiraConnector:
             summary=f.get("summary", ""),
             status=_map_status((f.get("status") or {}).get("name", "")),
             assignee=(assignee_field.get("emailAddress") or assignee_field.get("displayName")),
-            story_points=f.get("story_points") or f.get("customfield_10016"),
+            story_points=f.get("customfield_10016"),
             sprint_id=sprint_id,
             project_key=issue.get("key", "").split("-")[0],
             created_at=_parse_date(f.get("created")),
             updated_at=_parse_date(f.get("updated")),
             labels=f.get("labels", []),
-            epic_link=f.get("epic", {}).get("key") if f.get("epic") else f.get("customfield_10014"),
+            # customfield_10014 = Epic Link (classic projects)
+            # parent.key = epic in next-gen/team-managed projects
+            epic_link=(
+                f.get("customfield_10014")
+                or (f.get("parent") or {}).get("key")
+            ),
         )
 
     def _parse_issue_to_feature(self, issue: dict[str, Any]) -> JiraFeature:
@@ -314,7 +320,7 @@ class JiraConnector:
         fields = [
             "summary", "status", "assignee", "customfield_10016",
             "customfield_10020", "labels", "created", "updated",
-            "epic", "customfield_10014",
+            "customfield_10014", "parent",
         ]
         logger.debug(f"JiraConnector.fetch_stories JQL={jql!r}")
         issues = await self._paginate_issues(jql, fields)
@@ -410,31 +416,45 @@ class JiraConnector:
             )
         return boards
 
+    async def _fetch_board_sprints(self, board_id: str, state: str | None) -> list[JiraSprint]:
+        """Fetch sprints for a single board ID."""
+        params: dict[str, Any] = {"maxResults": 50}
+        if state:
+            params["state"] = state
+        data = await self._get(f"{self._BASE_AGILE}/board/{board_id}/sprint", params=params)
+        return [self._parse_sprint(s) for s in data.get("values", [])]
+
     async def fetch_sprints(
         self,
         board_id: str | None = None,
         state: str | None = None,
     ) -> list[JiraSprint]:
-        """Fetch sprints for a board. State can be 'active', 'closed', or 'future'.
-
-        TODO: board_id must be known in advance. Expose board listing via:
-        https://developer.atlassian.com/cloud/jira/software/rest/api-group-board/#api-rest-agile-1-0-board-get
-        """
+        """Fetch sprints. If board_id is omitted, auto-discovers all scrum boards first."""
         if self._mock:
             logger.debug("JiraConnector.fetch_sprints → mock")
             if state:
                 return [s for s in _MOCK_SPRINTS if s.state == state]
             return _MOCK_SPRINTS
 
-        if not board_id:
-            logger.warning("fetch_sprints called without board_id — returning empty list")
+        if board_id:
+            return await self._fetch_board_sprints(board_id, state)
+
+        # Auto-discover: fetch all boards then gather sprints for every scrum board
+        boards = await self.fetch_boards()
+        scrum_boards = [b for b in boards if b.type == "scrum"]
+        if not scrum_boards:
+            logger.warning("fetch_sprints: no scrum boards found — returning empty list")
             return []
 
-        params: dict[str, Any] = {"maxResults": 50}
-        if state:
-            params["state"] = state
-
-        data = await self._get(
-            f"{self._BASE_AGILE}/board/{board_id}/sprint", params=params
+        logger.debug(f"fetch_sprints: auto-discovered {len(scrum_boards)} scrum board(s)")
+        results = await asyncio.gather(
+            *[self._fetch_board_sprints(b.id, state) for b in scrum_boards],
+            return_exceptions=True,
         )
-        return [self._parse_sprint(s) for s in data.get("values", [])]
+        sprints: list[JiraSprint] = []
+        for board, outcome in zip(scrum_boards, results):
+            if isinstance(outcome, BaseException):
+                logger.warning(f"[jira] sprints fetch failed for board {board.id}: {outcome}")
+            else:
+                sprints.extend(outcome)
+        return sprints

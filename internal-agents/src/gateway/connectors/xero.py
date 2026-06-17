@@ -151,9 +151,12 @@ class XeroConnector:
     def __init__(self, mock: bool | None = None) -> None:
         settings = get_settings()
         self._mock = settings.mock_mode if mock is None else mock
-        # TODO: replace with proper OAuth2 token refresh flow
+        # Xero requires an OAuth2 access token (not the client secret).
+        # Obtain one via the PKCE flow: https://developer.xero.com/documentation/guides/oauth2/pkce-flow/
+        # Paste the resulting access token into XERO_ACCESS_TOKEN in .env.
+        # Tokens expire after 30 min — TODO: wire up automatic token refresh.
         self._headers = {
-            "Authorization": f"Bearer {settings.xero_client_secret}",
+            "Authorization": f"Bearer {settings.xero_access_token}",
             "Xero-Tenant-Id": settings.xero_tenant_id,
             "Accept": "application/json",
         }

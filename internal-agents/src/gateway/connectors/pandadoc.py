@@ -9,6 +9,7 @@ Auth: API key via Authorization: API-Key header.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -153,22 +154,24 @@ class PandaDocConnector:
         except ValueError:
             status = PandaDocStatus.DRAFT
 
-        # deal_id is stored as a custom metadata field — key name is configurable
-        # TODO: confirm the exact metadata field name used in your PandaDoc workspace
+        # deal_id lives in metadata — only present on detail responses (not list summaries)
         metadata = raw.get("metadata", {}) or {}
         deal_id = metadata.get("hubspot_deal_id") or metadata.get("deal_id")
 
         recipients = raw.get("recipients", []) or []
         first_recipient = recipients[0] if recipients else {}
+        first = (first_recipient.get("first_name") or "").strip()
+        last = (first_recipient.get("last_name") or "").strip()
+        recipient_name = " ".join(filter(None, [first, last])) or None
 
         return PandaDocContract(
             document_id=raw.get("id", ""),
             name=raw.get("name", ""),
             status=status,
             deal_id=deal_id,
-            recipient_name=first_recipient.get("first_name", "") + " " + first_recipient.get("last_name", ""),
+            recipient_name=recipient_name,
             recipient_email=first_recipient.get("email"),
-            total_value=_decimal(raw.get("grand_total", {}).get("amount")),
+            total_value=_decimal((raw.get("grand_total") or {}).get("amount")),
             currency=Currency.ZAR,
             created_at=_parse_datetime(raw.get("date_created")),
             sent_at=_parse_datetime(raw.get("date_sent")),
@@ -180,15 +183,18 @@ class PandaDocConnector:
     # Public API
     # ------------------------------------------------------------------
 
+    async def _fetch_document_detail(self, doc_id: str) -> dict:
+        """Fetch a single document's full detail, including metadata."""
+        return await self._get(f"/documents/{doc_id}/details")
+
     async def fetch_contracts(
         self,
         status: PandaDocStatus | None = None,
     ) -> list[PandaDocContract]:
         """Fetch all documents from PandaDoc, optionally filtered by status.
 
-        Note: PandaDoc's list endpoint returns summary objects. Full detail
-        (including metadata/custom fields) requires a second GET per document.
-        TODO: batch detail fetches with asyncio.gather for performance.
+        The list endpoint returns summaries without metadata (deal_id lives there),
+        so each document's detail is fetched in parallel to populate deal_id.
         """
         if self._mock:
             logger.debug("PandaDocConnector.fetch_contracts → mock")
@@ -200,5 +206,20 @@ class PandaDocConnector:
         if status:
             params["status"] = status.value
 
-        raw_list = await self._paginate("/documents", params=params)
-        return [self._parse_document(r) for r in raw_list]
+        summaries = await self._paginate("/documents", params=params)
+        if not summaries:
+            return []
+
+        # Fetch full detail for each doc in parallel to get metadata.hubspot_deal_id
+        details = await asyncio.gather(
+            *[self._fetch_document_detail(s["id"]) for s in summaries],
+            return_exceptions=True,
+        )
+        contracts = []
+        for summary, detail in zip(summaries, details):
+            if isinstance(detail, BaseException):
+                logger.warning(f"[pandadoc] detail fetch failed for {summary.get('id')}: {detail}")
+                contracts.append(self._parse_document(summary))
+            else:
+                contracts.append(self._parse_document(detail))
+        return contracts
